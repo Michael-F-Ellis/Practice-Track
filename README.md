@@ -51,11 +51,8 @@ Typical Usage:
             Fill in an integer values for the number of bars of silence to insert
             between items. The default is '1', any value >= 0 is acceptable.   
 
-    6. Click OK. Wait for processing to complete. The processing time depends on the
-       number of items in the track and the number of tempo time signature
-       changes. Processing hundreds of items might take several minutes.  For
-       just a few items, less than a second.  Should something go wrong, 'Edit
-       Undo' will revert your project in one step.
+    6. Click OK. Processing is quote fast, much less than 1 second for typical projects.
+       Should something go wrong, 'Edit Undo' will revert your project in one step.
 
     7. Edit the project as needed to create your practice track.
 
