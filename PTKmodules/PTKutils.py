@@ -7,9 +7,18 @@ License: Open Source (MIT License)
 
 """
 from reaper_python import *
-def dbg(obj):
+import sys, os
+def console(obj):
     """ Convenience wrapper for console logging """
     RPR_ShowConsoleMsg("{}\n".format(obj))
+
+class DebugPrint(object):
+    def __init__(self):
+        self.fp = open(os.path.join(sys.path[0], "practicetrack.log"), 'w+')
+    def message(self, obj):
+        print >> self.fp, "{}".format(obj)
+    
+dbg = DebugPrint().message
 
 def userInputs(title, **items):
     """

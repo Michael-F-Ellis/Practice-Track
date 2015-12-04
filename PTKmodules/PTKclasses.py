@@ -156,20 +156,23 @@ def run():
     for the start of the next item to be processed.
     '''
     endt = 0.0
-    #notfirst = False
-    incountsigs = []
+
+    '''
+    Init a dictionary of tempo time sigs with time position as keys.
+    '''
+    incountsigd = {}
     for item in trackitems:
         item.dump()
         if item.iid in selectediids:
-            endt, _incountsigs = item.replicate(endt, 
+            endt, _incountsigd = item.replicate(endt, 
                                    ndups, 
                                    nbetween=nbetween)
         else:
-            endt, _incountsigs = item.replicate(endt, 
+            endt, _incountsigd = item.replicate(endt, 
                                    0, 
                                    nbetween = nbetween)
 
-        incountsigs.extend(_incountsigs)
+        incountsigd.update(_incountsigd)
 
     tmr("Finished item processing")
 
@@ -181,15 +184,18 @@ def run():
     the problem I was trying to fix.  Eventually, it may be worthwhile to 
     move the creation back into the replicate() method.
     '''
-    for sig in incountsigs:
-        sig.create()
+    sigtimes = getNonRedundantSigTimes(incountsigd)
+    tmr("Finished getting non-redundant sig times.")
+
+    for t in sigtimes:
+        incountsigd[t].create()
 
     tmr("Finished creating incount sigs.")
 
     # clean up the sigs
-    removeRedundantSigs()
+    #removeRedundantSigs()
 
-    tmr("Finished removing redundant sigs.")
+    #tmr("Finished removing redundant sigs.")
 
     # Unfreeze the UI
     RPR_PreventUIRefresh(-1)
@@ -311,19 +317,30 @@ class TempoTimeSigMarkerWrapper(object):
                                   self.timesig_num, self.timesig_denom,
                                   self.lineartempo)
 
-    def clone(self, time_offset, is_offset=True):
+    def clone(self, time_value, is_offset=True, deferred=False):
         """
-        Make a copy offset by time_offset seconds (positive or negative)
+        Make a copy of this object.
+        args:
+            - time_value is in seconds. It's interpretation depends on
+
+            - is_offset.  When is_offset is True time_value is added to this
+            object's time position, otherwise it is assigned.
+
+            - deferred controls whether the clone is instantiated in Reaper. Deferring
+            instantiation in Reaper allows for some performance improvements.
+        returns:
+            - the cloned instance.
+        
         """
         cloned = TempoTimeSigMarkerWrapper(self.proj, self.ptidx)
         if is_offset:
-            cloned.timepos = self.timepos + time_offset
+            cloned.timepos = self.timepos + time_value
             dbg("Cloning sig {} with offset {} to {}".format(self.ptidx,
-                                                      time_offset, 
+                                                      time_value, 
                                                       cloned.timepos))
         else:
-            dbg("Cloning sig {} without offset at {}".format(self.ptidx, time_offset))
-            cloned.timepos = time_offset
+            dbg("Cloning sig {} without offset at {}".format(self.ptidx, time_value))
+            cloned.timepos = time_value
 
         cloned.timesig_num = self.timesig_num
         cloned.timesig_denom = self.timesig_denom
@@ -332,7 +349,8 @@ class TempoTimeSigMarkerWrapper(object):
 
         cloned.ptidx = -1
         assert cloned.timepos >= 0.0
-        cloned.set(use_timepos=True)
+        if not deferred:
+            cloned.set(use_timepos=True)
         return cloned
 
     def remove(self):
@@ -518,7 +536,7 @@ class MediaItemReplicator(object):
                 #sig.dump()
             if sig.timepos <= self.pos + .001:
                 insig = sig
-        incountsigs = []
+        incountsigd = {}
 
         #dbg("\nIncount sig info:")
         #incountsig.dump()
@@ -530,7 +548,7 @@ class MediaItemReplicator(object):
         # Caculate destination time position
         t = t0
         dbg("Entering replicate() with t={}".format(t))
-        incountsigs.append(TempoTimeSigMarkerWrapper(self.proj, None,
+        incountsigd[t] = (TempoTimeSigMarkerWrapper(self.proj, None,
                 timepos = t,
                 bpm = insig.bpm,
                 num = insig.timesig_num,
@@ -549,7 +567,7 @@ class MediaItemReplicator(object):
         # copy the tempo time markers to the new location.
         for sig in itemsigs:
             newpos = t
-            sig.clone(newpos - self.pos)
+            incountsigd[t] = sig.clone(newpos - self.pos, deferred=True)
 
         # Advance to end of item
         t += self.length
@@ -558,7 +576,7 @@ class MediaItemReplicator(object):
         # Apppend the requested number of duplicates.
         for _ in range(ndups):
             # Insert a tempo time at start of incount measure.
-            incountsigs.append(TempoTimeSigMarkerWrapper(self.proj, None,
+            incountsigd[t] = (TempoTimeSigMarkerWrapper(self.proj, None,
                 timepos = t,
                 bpm = insig.bpm,
                 num = insig.timesig_num,
@@ -572,7 +590,7 @@ class MediaItemReplicator(object):
             # Clone the tempo time sigs
             for sig in itemsigs:
                 newpos = t
-                sig.clone(newpos - self.pos)
+                incountsigd[t] = sig.clone(newpos - self.pos, deferred=True)
 
             # Compute the offset for duplication
             nudge = self.length 
@@ -602,7 +620,7 @@ class MediaItemReplicator(object):
 
         # Return end time for last dup so we can use it as
         # the start of the next item to be processed.
-        return t, incountsigs
+        return t, incountsigd
 
 class RunTimer(object):
     """
@@ -617,8 +635,10 @@ class RunTimer(object):
         self.start = time.time()
     
     def message(self, obj):
-        dbg("{}: {}".format(time.time() - self.start, obj))
-
+        elapsed = time.time() - self.start
+        msg = "{}: {}".format(elapsed, obj)
+        dbg(msg)
+        return msg
 
 def equivalentSigs(sig1, sig2):
     """
@@ -628,6 +648,30 @@ def equivalentSigs(sig1, sig2):
             sig1.timesig_num == sig2.timesig_num and
             sig1.timesig_denom == sig2.timesig_denom and
             sig1.lineartempo == sig2.lineartempo)
+
+
+def getNonRedundantSigTimes(sigd):
+    """
+    Return a list of time positions in ascending order that correspond
+    to signatures that are not duplicates of their immmediate predecessors.
+
+    args:
+        - sigd : a dictionary of TempoTimeSigMarkerWrappers with time
+                 positions as keys.
+
+    """
+    ## list the keys in reverse order
+    sigtimes_r = sorted(sigd.keys(), reverse=True)
+    ## Init a list for the non-redundant keys
+    nrkeys = []
+    ## check each sig for equivalence with its predecessor.
+    for i, t in enumerate(sigtimes_r[0:-1]):
+        current = sigd[sigtimes_r[i]]
+        previous = sigd[sigtimes_r[i+1]]
+        if not equivalentSigs(previous, current):
+            dbg("Sig at {} is non-redundant".format(t))
+            nrkeys.insert(0,t)
+    return nrkeys        
 
 
 def removeRedundantSigs():
